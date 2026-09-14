@@ -75,7 +75,8 @@
             font-size: 0.95rem;
         }
         input[type="url"],
-        input[type="text"] {
+        input[type="text"],
+        input[type="number"] {
             width: 100%;
             padding: 12px 14px;
             border: 1px solid #d1d5db;
@@ -337,8 +338,8 @@
         <h2>👑 Dg マスターコントロール Pro</h2>
 
         <div class="form-group">
-            <label>📍 ルーム識別子 (ID)</label>
-            <input type="text" id="roomIdInput" value="">
+            <label>📍 ルーム識別子 (数字のみ・何桁でもOK)</label>
+            <input type="text" id="roomIdInput" inputmode="numeric" pattern="[0-9]*" placeholder="例: 123 など">
         </div>
 
         <button id="generateBtn" class="btn-primary">🔗 接続リンクを発行する</button>
@@ -432,8 +433,15 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        const defaultRoomId = 'room_' + Math.random().toString(36).substring(2, 8);
-        document.getElementById('roomIdInput').value = defaultRoomId;
+        // 初期値としてランダムな数字数桁を設定
+        const defaultRoomId = Math.floor(1000 + Math.random() * 9000).toString();
+        const roomIdInput = document.getElementById('roomIdInput');
+        roomIdInput.value = defaultRoomId;
+
+        // 入力時に数字以外を自動で弾く処理
+        roomIdInput.addEventListener('input', (e) => {
+            roomIdInput.value = roomIdInput.value.replace(/[^0-9]/g, '');
+        });
 
         const urlParams = new URLSearchParams(window.location.search);
         const activeRoom = urlParams.get('room');
@@ -469,7 +477,6 @@
                 if (!cmd) return;
 
                 if (cmd.action === 'lockAll') {
-                    // 完全ロック（何もしない・チャットも停止）
                     activeContainer.style.display = 'none';
                     statusText.innerText = "接続完了：ホストからの指示を待っています...";
                     peerChatInput.disabled = true;
@@ -648,7 +655,7 @@
 
             function generateSessionLink() {
                 const rId = document.getElementById('roomIdInput').value.trim();
-                if (!rId) return alert('ルームIDを入力してください');
+                if (!rId) return alert('ルームID（数字）を入力してください');
 
                 const baseUrl = window.location.href.split('?')[0];
                 const link = baseUrl + '?room=' + rId;
@@ -899,7 +906,7 @@
         }
 
         document.getElementById('copyBtn').addEventListener('click', () => {
-            The link = document.getElementById('shareableLink').textContent;
+            const link = document.getElementById('shareableLink').textContent;
             navigator.clipboard.writeText(link).then(() => {
                 const btn = document.getElementById('copyBtn');
                 btn.textContent = '✅ コピー完了！';
