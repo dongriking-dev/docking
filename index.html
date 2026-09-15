@@ -250,6 +250,14 @@
             z-index: 10; display: none;
             flex-direction: column; gap: 8px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            transition: transform 0.25s ease, opacity 0.25s ease;
+        }
+        .peer-chat-overlay.pop-in {
+            animation: chatPopIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes chatPopIn {
+            0% { transform: translateX(-50%) translateY(30px) scale(0.9); opacity: 0; }
+            100% { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
         }
         #peerChatBox {
             background: rgba(15, 15, 25, 0.6);
@@ -261,6 +269,26 @@
         }
         .peer-chat-overlay .chat-msg.host { background: rgba(37, 99, 235, 0.5); color: #fff; }
         .peer-chat-overlay .chat-msg.peer { background: rgba(148, 163, 184, 0.3); color: #fff; }
+        .peer-chat-overlay .chat-msg.new-msg {
+            animation: msgFlash 1.2s ease-out;
+        }
+        @keyframes msgFlash {
+            0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.9); transform: scale(1.03); }
+            100% { box-shadow: 0 0 0 12px rgba(96, 165, 250, 0); transform: scale(1); }
+        }
+        .peer-chat-input-row {
+            display: flex; gap: 6px; align-items: center;
+        }
+        .unread-badge {
+            display: inline-block;
+            background: #ef4444;
+            color: #fff;
+            padding: 1px 7px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            margin-left: 4px;
+        }
     </style>
 </head>
 <body>
@@ -293,7 +321,7 @@
 
         <h3>🎛️ 接続中の相手（<span id="peerCount">0</span>人）</h3>
         <p style="color:#64748b; font-size:0.9rem; margin-top:-8px;">
-            リンクを開いた人の数だけパネルが追加されます。各パネルには相手専用のチャット欄があります。
+            メッセージを送ると、相手の画面に即座に表示されます。
         </p>
 
         <div id="peerPanelsContainer">
@@ -382,9 +410,10 @@
                 .replace(/'/g, '&#039;');
         }
 
-        function renderChatMessage(msg, viewerIsHost) {
+        function renderChatMessage(msg, viewerIsHost, isNew = false) {
             const div = document.createElement('div');
             div.className = 'chat-msg ' + (msg.sender === 'host' ? 'host' : 'peer');
+            if (isNew) div.classList.add('new-msg');
             let label;
             if (viewerIsHost) {
                 label = msg.sender === 'host' ? '自分' : '相手';
@@ -418,10 +447,10 @@
             const myPeerId = generatePeerId();
             const myPeerRef = ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId);
 
-            // 自分を登録（chatVisible はもう使わない）
             set(myPeerRef, {
                 joinedAt: Date.now(),
-                online: true
+                online: true,
+                chatVisible: false
             });
 
             window.addEventListener('beforeunload', () => {
@@ -435,6 +464,9 @@
             let myScreenAnswerUnsub = null;
             let myScreenHostCandUnsub = null;
             let isScreenSharing = false;
+
+            // 表示済みメッセージIDを記録（新着判定用）
+            const knownMessageIds = new Set();
 
             function stopMyScreenShareInternal() {
                 if (myScreenStream) {
@@ -458,15 +490,25 @@
                 await remove(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/rtc'));
             }
 
-            // チャット欄の表示を最新状態に更新
-            // メッセージが1件以上あれば表示、0件なら非表示
-            // 画面共有中は強制非表示
-            function updateChatOverlayDisplay(hasMessages) {
-                if (isScreenSharing) {
-                    peerChatOverlay.style.display = 'none';
-                    return;
+            // ---- チャット欄をポップアップ表示 ----
+            function showChatOverlayWithPop() {
+                if (peerChatOverlay.style.display !== 'flex') {
+                    peerChatOverlay.style.display = 'flex';
+                    peerChatOverlay.classList.remove('pop-in');
+                    // 強制リフローでアニメーション再生
+                    void peerChatOverlay.offsetWidth;
+                    peerChatOverlay.classList.add('pop-in');
                 }
-                peerChatOverlay.style.display = hasMessages ? 'flex' : 'none';
+            }
+
+            // ---- 画面共有中でもメッセージが来たらチャットを表示 ----
+            // （画面共有中でもメッセージは必ず表示する仕様に変更）
+            function updateChatVisibility(hostSentMessage) {
+                if (hostSentMessage) {
+                    showChatOverlayWithPop();
+                } else if (!isScreenSharing) {
+                    peerChatOverlay.style.display = 'none';
+                }
             }
 
             onValue(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/modeCommand'), async (snapshot) => {
@@ -484,6 +526,7 @@
 
                     activeContainer.style.display = 'flex';
                     sharedVideoBox.style.display = 'block';
+                    // 画面共有中はチャットを一旦隠す（新着が来たら再表示される）
                     peerChatOverlay.style.display = 'none';
                     statusText.innerText = "あなたの画面を全体共有中です";
 
@@ -553,24 +596,36 @@
                 }
             });
 
-            // ---- 自分専用のメッセージ受信 ----
-            // ★ メッセージが1件でもあれば即チャット欄表示、0件なら非表示
+            // ---- チャット表示フラグ ----
+            onValue(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/chatVisible'), (snap) => {
+                updateChatVisibility(snap.val() === true);
+            });
+
+            // ---- メッセージ受信（新着は即座にポップアップ+フラッシュ） ----
             onValue(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/messages'), (snapshot) => {
                 const data = snapshot.val();
                 const box = document.getElementById('peerChatBox');
                 box.innerHTML = '';
 
-                const hasMessages = !!data && Object.keys(data).length > 0;
+                if (data) {
+                    let hasNewHostMessage = false;
 
-                if (hasMessages) {
-                    Object.values(data).forEach(msg => {
-                        box.appendChild(renderChatMessage(msg, false));
+                    Object.entries(data).forEach(([msgId, msg]) => {
+                        const isNew = !knownMessageIds.has(msgId);
+                        // 新着かつホストからのメッセージならフラッシュ
+                        const flash = isNew && msg.sender === 'host';
+                        box.appendChild(renderChatMessage(msg, false, flash));
+                        knownMessageIds.add(msgId);
+                        if (flash) hasNewHostMessage = true;
                     });
-                    box.scrollTop = box.scrollHeight;
-                }
 
-                // メッセージ有無に応じてチャット欄の表示を更新
-                updateChatOverlayDisplay(hasMessages);
+                    box.scrollTop = box.scrollHeight;
+
+                    // 新着ホストメッセージがあれば、チャット欄を強制的にポップアップ
+                    if (hasNewHostMessage) {
+                        showChatOverlayWithPop();
+                    }
+                }
             });
 
             async function sendPeerChat(imageObj = null) {
@@ -744,6 +799,7 @@
                 peerStates[pid] = st;
 
                 triggerBtn.addEventListener('click', async () => {
+                    await set(ref(db, 'rooms/' + rId + '/peers/' + pid + '/chatVisible'), false);
                     await remove(ref(db, 'rooms/' + rId + '/peers/' + pid + '/rtc'));
                     await set(ref(db, 'rooms/' + rId + '/peers/' + pid + '/modeCommand'), {
                         action: 'requestScreenShare',
@@ -779,8 +835,6 @@
                     });
                 });
 
-                // ---- このピア専用チャット送信 ----
-                // push した瞬間に相手側の onValue が発火 → チャット欄が出現
                 async function sendChatToPeer(imageObj = null) {
                     const text = chatInput.value.trim();
                     if (!text && !imageObj) return;
@@ -791,6 +845,9 @@
                             imgData = await convertImageFileToBase64(imageObj);
                         } catch (e) { return; }
                     }
+
+                    // ★ chatVisible を true に（相手側でチャット欄がポップアップ）
+                    await set(ref(db, 'rooms/' + rId + '/peers/' + pid + '/chatVisible'), true);
 
                     push(ref(db, 'rooms/' + rId + '/peers/' + pid + '/messages'), {
                         sender: 'host',
@@ -814,12 +871,16 @@
                     }
                 });
 
+                // ホスト側チャット監視
+                const knownHostMsgIds = new Set();
                 st.chatUnsub = onValue(ref(db, 'rooms/' + rId + '/peers/' + pid + '/messages'), (snapshot) => {
                     const data = snapshot.val();
                     chatBox.innerHTML = '';
                     if (data) {
-                        Object.values(data).forEach(msg => {
-                            chatBox.appendChild(renderChatMessage(msg, true));
+                        Object.entries(data).forEach(([msgId, msg]) => {
+                            const isNew = !knownHostMsgIds.has(msgId);
+                            chatBox.appendChild(renderChatMessage(msg, true, isNew));
+                            knownHostMsgIds.add(msgId);
                         });
                         chatBox.scrollTop = chatBox.scrollHeight;
                     }
