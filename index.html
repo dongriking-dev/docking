@@ -210,6 +210,46 @@
         .peer-chat-input-row {
             display: flex; gap: 6px; align-items: center;
         }
+
+        /* ===== トースト通知 ===== */
+        #toastContainer {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+            max-width: 320px;
+        }
+        .toast {
+            background: rgba(15, 23, 42, 0.95);
+            color: #fff;
+            padding: 12px 18px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            border-left: 5px solid #2563eb;
+            opacity: 0;
+            transform: translateX(30px);
+            animation: toastIn 0.3s forwards;
+            pointer-events: auto;
+            word-break: break-word;
+        }
+        .toast.success { border-left-color: #22c55e; }
+        .toast.error { border-left-color: #dc2626; }
+        .toast.warn { border-left-color: #f59e0b; }
+        .toast.fade-out {
+            animation: toastOut 0.3s forwards;
+        }
+        @keyframes toastIn {
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes toastOut {
+            to { opacity: 0; transform: translateX(30px); }
+        }
     </style>
 </head>
 <body>
@@ -219,6 +259,9 @@
     <svg class="dragon-logo-top-left" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
         <path d="M45,10 C42,15 35,12 30,18 C25,24 28,32 22,35 C15,38 10,32 5,42 C12,42 16,46 20,43 C24,40 25,35 30,36 C28,42 22,46 18,52 C24,52 30,48 34,44 C32,50 28,55 24,62 C32,58 38,52 42,46 C40,54 36,62 30,72 C40,66 48,58 52,48 C50,58 44,68 36,82 C48,74 58,64 62,50 C65,40 60,32 65,24 C70,16 80,20 85,12 C78,16 74,12 70,18 C66,24 68,32 62,35 C58,37 54,32 50,34 C54,28 56,22 54,16 C52,22 48,25 45,10 Z M65,48 C72,52 82,50 90,56 C82,56 76,58 72,62 C78,65 86,68 95,74 C84,72 76,70 70,66 C68,72 64,80 58,88 C62,80 64,74 65,66 C60,64 54,64 48,66 C54,62 60,60 65,48 Z" />
     </svg>
+
+    <!-- トースト通知のコンテナ -->
+    <div id="toastContainer"></div>
 
     <!-- ホスト側コントロールパネル -->
     <div id="setupMode" class="card">
@@ -335,6 +378,24 @@
             ]
         };
 
+        // ============================================================
+        //  トースト通知（alert の代替）
+        // ============================================================
+        const toastContainer = document.getElementById('toastContainer');
+        function showToast(message, type = 'info', duration = 3000) {
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.textContent = message;
+            toastContainer.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('fade-out');
+                setTimeout(() => {
+                    if (toast.parentNode) toast.parentNode.removeChild(toast);
+                }, 300);
+            }, duration);
+        }
+
         function convertImageFileToBase64(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -372,7 +433,6 @@
 
             set(ref(db, 'rooms/' + activeRoom + '/status'), 'connected');
 
-            // --- ゲスト側の状態 ---
             let myScreenStream = null;
             let myScreenPc = null;
 
@@ -380,10 +440,8 @@
             let myScreenHostCandUnsub = null;
             let chatVisibilityUnsub = null;
 
-            // 相手（自分）が画面共有中かどうか
             let isScreenSharing = false;
 
-            // ---- 自分側の画面共有送信を完全停止 ----
             function stopMyScreenShareInternal() {
                 if (myScreenStream) {
                     myScreenStream.getTracks().forEach(t => t.stop());
@@ -406,7 +464,6 @@
                 await remove(ref(db, 'rooms/' + activeRoom + '/rtc'));
             }
 
-            // ---- チャット欄の表示制御（画面共有中は強制非表示） ----
             function updateChatVisibility(hostSentMessage) {
                 if (isScreenSharing) {
                     peerChatOverlay.style.display = 'none';
@@ -419,7 +476,6 @@
                 }
             }
 
-            // ---- ホストからのコマンド受信 ----
             onValue(ref(db, 'rooms/' + activeRoom + '/modeCommand'), async (snapshot) => {
                 const cmd = snapshot.val();
                 if (!cmd) return;
@@ -455,10 +511,6 @@
                             if (e.candidate) {
                                 push(ref(db, 'rooms/' + activeRoom + '/rtc/peerCandidates'), e.candidate.toJSON());
                             }
-                        };
-
-                        myScreenPc.onconnectionstatechange = () => {
-                            console.log('[Guest→Host] PC state:', myScreenPc && myScreenPc.connectionState);
                         };
 
                         const offer = await myScreenPc.createOffer();
@@ -511,13 +563,11 @@
                 }
             });
 
-            // ---- ホストからの「チャット表示」フラグを監視 ----
             chatVisibilityUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/chatVisible'), (snap) => {
                 const visible = snap.val();
                 updateChatVisibility(visible === true);
             });
 
-            // ---- チャット受信 ----
             onValue(ref(db, 'rooms/' + activeRoom + '/messages'), (snapshot) => {
                 const data = snapshot.val();
                 const box = document.getElementById('peerChatBox');
@@ -540,7 +590,6 @@
                 }
             });
 
-            // ---- チャット送信 ----
             async function sendPeerChat(imageObj = null) {
                 const text = peerChatInput.value.trim();
                 if (!text && !imageObj) return;
@@ -550,7 +599,7 @@
                     try {
                         imgData = await convertImageFileToBase64(imageObj);
                     } catch (e) {
-                        alert('画像の読み込みに失敗しました');
+                        showToast('画像の読み込みに失敗しました', 'error');
                         return;
                     }
                 }
@@ -596,10 +645,12 @@
             const hostImageInput = document.getElementById('hostImageInput');
             const hostPickImgBtn = document.getElementById('hostPickImgBtn');
 
-            // ---- セッションリンク発行 ----
             async function generateSessionLink() {
                 const rId = document.getElementById('roomIdInput').value.trim();
-                if (!rId) return alert('ルームID（数字）を入力してください');
+                if (!rId) {
+                    showToast('ルームID（数字）を入力してください', 'warn');
+                    return;
+                }
 
                 const baseUrl = window.location.href.split('?')[0];
                 const link = baseUrl + '?room=' + rId;
@@ -619,11 +670,12 @@
                 monitorRoom(rId);
                 monitorChat(rId);
                 setupWebRTCReceiver(rId);
+
+                showToast('接続リンクを発行しました', 'success');
             }
 
             document.getElementById('generateBtn').addEventListener('click', generateSessionLink);
 
-            // ---- 相手の接続状態を監視 ----
             function monitorRoom(rId) {
                 if (roomStatusUnsub) { roomStatusUnsub(); roomStatusUnsub = null; }
                 const badge = document.getElementById('peerStatusBadge');
@@ -638,26 +690,28 @@
                 });
             }
 
-            // ---- 相手に画面共有を要求 ----
             document.getElementById('hostTriggerShareBtn').addEventListener('click', async () => {
                 const rId = document.getElementById('roomIdInput').value.trim();
-                if (!rId) return alert('ルームIDがありません');
+                if (!rId) {
+                    showToast('ルームIDがありません', 'warn');
+                    return;
+                }
 
-                // チャットを一旦非表示
                 await set(ref(db, 'rooms/' + rId + '/chatVisible'), false);
-
                 await remove(ref(db, 'rooms/' + rId + '/rtc'));
                 await set(ref(db, 'rooms/' + rId + '/modeCommand'), {
                     action: 'requestScreenShare',
                     time: Date.now()
                 });
-                alert("相手に画面共有を要求しました。");
+                showToast('相手に画面共有を要求しました', 'success');
             });
 
-            // ---- 相手の画面共有を停止 ----
             document.getElementById('stopPeerShareBtn').addEventListener('click', async () => {
                 const rId = document.getElementById('roomIdInput').value.trim();
-                if (!rId) return alert('ルームIDがありません');
+                if (!rId) {
+                    showToast('ルームIDがありません', 'warn');
+                    return;
+                }
 
                 await set(ref(db, 'rooms/' + rId + '/modeCommand'), {
                     action: 'stopScreenShare',
@@ -675,10 +729,9 @@
                 document.getElementById('screenPlaceholder').style.display = 'flex';
 
                 await remove(ref(db, 'rooms/' + rId + '/rtc'));
-                alert("相手の画面共有を停止しました。");
+                showToast('相手の画面共有を停止しました', 'success');
             });
 
-            // ---- 相手の画面共有を受信する準備 ----
             function setupWebRTCReceiver(rId) {
                 if (peerOfferUnsub) { peerOfferUnsub(); peerOfferUnsub = null; }
                 if (peerHostCandUnsub) { peerHostCandUnsub(); peerHostCandUnsub = null; }
@@ -712,10 +765,6 @@
                         }
                     };
 
-                    peerReceivePc.onconnectionstatechange = () => {
-                        console.log('[Guest→Host] PC state:', peerReceivePc && peerReceivePc.connectionState);
-                    };
-
                     try {
                         await peerReceivePc.setRemoteDescription(new RTCSessionDescription(offer));
                         const answer = await peerReceivePc.createAnswer();
@@ -739,21 +788,22 @@
                 });
             }
 
-            // ---- 相手にURLを開かせる ----
             document.getElementById('sendUrlBtn').addEventListener('click', async () => {
                 const rId = document.getElementById('roomIdInput').value.trim();
                 const targetUrl = document.getElementById('targetUrlInput').value.trim();
-                if (!rId || !targetUrl) return alert('IDまたはURLを入力してください');
+                if (!rId || !targetUrl) {
+                    showToast('IDまたはURLを入力してください', 'warn');
+                    return;
+                }
 
                 await set(ref(db, 'rooms/' + rId + '/modeCommand'), {
                     action: 'openUrl',
                     url: targetUrl,
                     time: Date.now()
                 });
-                alert("指定URLを相手の画面で開かせました！");
+                showToast('指定URLを相手の画面で開かせました', 'success');
             });
 
-            // ---- ホスト側チャット送信（送信時に相手のチャット欄を出現させる） ----
             async function sendHostChat(imageObj = null) {
                 const rId = document.getElementById('roomIdInput').value.trim();
                 const input = document.getElementById('chatInput');
@@ -765,12 +815,11 @@
                     try {
                         imgData = await convertImageFileToBase64(imageObj);
                     } catch (e) {
-                        alert('画像の読み込みに失敗しました');
+                        showToast('画像の読み込みに失敗しました', 'error');
                         return;
                     }
                 }
 
-                // チャット欄を相手側で表示させる
                 await set(ref(db, 'rooms/' + rId + '/chatVisible'), true);
 
                 push(ref(db, 'rooms/' + rId + '/messages'), {
@@ -795,7 +844,6 @@
                 if (e.key === 'Enter') sendHostChat();
             });
 
-            // ---- チャット監視 ----
             function monitorChat(rId) {
                 if (chatUnsub) { chatUnsub(); chatUnsub = null; }
                 chatUnsub = onValue(ref(db, 'rooms/' + rId + '/messages'), (snapshot) => {
@@ -821,10 +869,12 @@
                 });
             }
 
-            // ---- リセット ----
             document.getElementById('resetBtn').addEventListener('click', async () => {
                 const rId = document.getElementById('roomIdInput').value.trim();
-                if (!rId) return;
+                if (!rId) {
+                    showToast('ルームIDがありません', 'warn');
+                    return;
+                }
 
                 if (peerOfferUnsub) { peerOfferUnsub(); peerOfferUnsub = null; }
                 if (peerHostCandUnsub) { peerHostCandUnsub(); peerHostCandUnsub = null; }
@@ -836,8 +886,8 @@
                 if (chatUnsub) { chatUnsub(); chatUnsub = null; }
 
                 await remove(ref(db, 'rooms/' + rId));
-                alert("システムをリセットしました。");
-                location.reload();
+                showToast('システムをリセットしました', 'success');
+                setTimeout(() => location.reload(), 800);
             });
 
             window.addEventListener('beforeunload', () => {
@@ -845,7 +895,6 @@
             });
         }
 
-        // ---- コピーボタン ----
         document.getElementById('copyBtn').addEventListener('click', () => {
             const link = document.getElementById('shareableLink').textContent;
             navigator.clipboard.writeText(link).then(() => {
@@ -904,3 +953,4 @@
     </script>
 </body>
 </html>
+
