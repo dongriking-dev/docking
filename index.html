@@ -347,7 +347,6 @@
             ]
         };
 
-        // 画像ファイルをBase64文字列に変換
         function convertImageFileToBase64(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -385,16 +384,20 @@
 
             set(ref(db, 'rooms/' + activeRoom + '/status'), 'connected');
 
-            // --- ゲスト側の状態管理 ---
-            let myScreenStream = null;          // 自分が共有しているストリーム
-            let myScreenPc = null;              // 自分→ホスト 送信用PC
-            let hostReceivePc = null;           // ホスト→自分 受信用PC
+            // --- ゲスト側の状態 ---
+            let myScreenStream = null;
+            let myScreenPc = null;
+            let hostReceivePc = null;
 
             // リスナー解除用
             let myScreenAnswerUnsub = null;
             let myScreenHostCandUnsub = null;
             let hostOfferUnsub = null;
             let hostCandUnsub = null;
+            let chatVisibilityUnsub = null;
+
+            // 画面共有中かどうかのフラグ（チャット表示制御用）
+            let isScreenSharing = false;
 
             // ---- 自分側の画面共有送信を完全停止 ----
             function stopMyScreenShareInternal() {
@@ -410,6 +413,7 @@
                 if (myScreenHostCandUnsub) { myScreenHostCandUnsub(); myScreenHostCandUnsub = null; }
                 localSharedVideo.srcObject = null;
                 sharedVideoBox.style.display = 'none';
+                isScreenSharing = false;
             }
 
             async function stopMyScreenShare() {
@@ -428,6 +432,22 @@
                 }
                 localSharedVideo.srcObject = null;
                 sharedVideoBox.style.display = 'none';
+                isScreenSharing = false;
+            }
+
+            // ---- チャット欄の表示制御（画面共有中は強制的に非表示） ----
+            function updateChatVisibility(hostSentMessage) {
+                // 画面共有中はチャットを絶対に出さない
+                if (isScreenSharing) {
+                    peerChatOverlay.style.display = 'none';
+                    return;
+                }
+                // 画面共有していない時は、ホストがメッセージを送った場合のみ表示
+                if (hostSentMessage) {
+                    peerChatOverlay.style.display = 'flex';
+                } else {
+                    peerChatOverlay.style.display = 'none';
+                }
             }
 
             // ---- ホストからのコマンド受信 ----
@@ -437,20 +457,24 @@
 
                 if (cmd.action === 'lockAll') {
                     stopMyScreenShareInternal();
+                    stopHostReceive();
+                    peerChatOverlay.style.display = 'none';
+                    activeContainer.style.display = 'none';
                     statusText.innerText = "接続完了：ホストからの指示を待っています...";
 
-                } else if (cmd.action === 'showChat') {
+                } else if (cmd.action === 'shareFullscreen') {
+                    // ホストの画面を全画面表示（チャットは出さない）
                     activeContainer.style.display = 'flex';
-                    peerChatOverlay.style.display = 'flex';
-                    statusText.innerText = "メッセージ・画像通話セッション中";
+                    sharedVideoBox.style.display = 'block';
+                    peerChatOverlay.style.display = 'none';
+                    statusText.innerText = "ホストの画面を全画面表示中";
 
                 } else if (cmd.action === 'requestScreenShare') {
-                    // 既存の送信をすべて破棄
                     stopMyScreenShareInternal();
 
                     activeContainer.style.display = 'flex';
                     sharedVideoBox.style.display = 'block';
-                    peerChatOverlay.style.display = 'flex';
+                    peerChatOverlay.style.display = 'none';
                     statusText.innerText = "あなたの画面を全体共有中です";
 
                     try {
@@ -459,8 +483,8 @@
                             audio: true
                         });
                         localSharedVideo.srcObject = myScreenStream;
+                        isScreenSharing = true;
 
-                        // Firebase上の古いシグナリングをクリア
                         await remove(ref(db, 'rooms/' + activeRoom + '/rtc'));
 
                         myScreenPc = new RTCPeerConnection(rtcConfig);
@@ -472,10 +496,6 @@
                             }
                         };
 
-                        myScreenPc.onconnectionstatechange = () => {
-                            console.log('[Guest→Host] PC state:', myScreenPc && myScreenPc.connectionState);
-                        };
-
                         const offer = await myScreenPc.createOffer();
                         await myScreenPc.setLocalDescription(offer);
                         await set(ref(db, 'rooms/' + activeRoom + '/rtc/offer'), {
@@ -484,7 +504,6 @@
                             time: Date.now()
                         });
 
-                        // ホストからの answer を待つ
                         myScreenAnswerUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/rtc/answer'), async (snap) => {
                             const ans = snap.val();
                             if (ans && myScreenPc && myScreenPc.signalingState === 'have-local-offer') {
@@ -496,7 +515,6 @@
                             }
                         });
 
-                        // ホストからの ICE 候補を待つ
                         myScreenHostCandUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/rtc/hostCandidates'), (snap) => {
                             const cands = snap.val();
                             if (cands && myScreenPc) {
@@ -506,7 +524,6 @@
                             }
                         });
 
-                        // ユーザーがブラウザの「共有停止」を押したとき
                         myScreenStream.getVideoTracks()[0].onended = () => {
                             stopMyScreenShare();
                         };
@@ -515,11 +532,13 @@
                         console.error('getDisplayMedia error:', err);
                         statusText.innerText = "画面共有がキャンセルまたは拒否されました";
                         sharedVideoBox.style.display = 'none';
+                        isScreenSharing = false;
                         await remove(ref(db, 'rooms/' + activeRoom + '/rtc'));
                     }
 
                 } else if (cmd.action === 'stopScreenShare') {
                     await stopMyScreenShare();
+                    peerChatOverlay.style.display = 'none';
 
                 } else if (cmd.action === 'openUrl') {
                     statusText.innerText = `指定サイトを開いています: ${cmd.url}`;
@@ -531,7 +550,6 @@
             hostOfferUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/rtcHostToPeer/offer'), async (snapshot) => {
                 const offer = snapshot.val();
 
-                // 既存の受信を破棄
                 if (hostCandUnsub) { hostCandUnsub(); hostCandUnsub = null; }
                 if (hostReceivePc) {
                     hostReceivePc.close();
@@ -541,14 +559,18 @@
                 if (!offer) {
                     localSharedVideo.srcObject = null;
                     sharedVideoBox.style.display = 'none';
+                    isScreenSharing = false;
                     statusText.innerText = "ホストの画面共有が終了しました";
+                    // チャットは表示しない（ホストがメッセージ送信時のみ表示）
                     return;
                 }
 
                 activeContainer.style.display = 'flex';
                 sharedVideoBox.style.display = 'block';
-                peerChatOverlay.style.display = 'flex';
-                statusText.innerText = "ホストの画面を受信中（全体表示）";
+                // 画面共有中はチャットを出さない
+                peerChatOverlay.style.display = 'none';
+                isScreenSharing = true;
+                statusText.innerText = "ホストの画面を受信中（全画面表示）";
 
                 hostReceivePc = new RTCPeerConnection(rtcConfig);
 
@@ -561,10 +583,6 @@
                     if (e.candidate) {
                         push(ref(db, 'rooms/' + activeRoom + '/rtcHostToPeer/peerCandidates'), e.candidate.toJSON());
                     }
-                };
-
-                hostReceivePc.onconnectionstatechange = () => {
-                    console.log('[Host→Guest] PC state:', hostReceivePc && hostReceivePc.connectionState);
                 };
 
                 try {
@@ -590,14 +608,22 @@
                 }
             });
 
+            // ---- ホストからの「チャット表示」フラグを監視 ----
+            chatVisibilityUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/chatVisible'), (snap) => {
+                const visible = snap.val();
+                if (visible === true && !isScreenSharing) {
+                    peerChatOverlay.style.display = 'flex';
+                } else {
+                    peerChatOverlay.style.display = 'none';
+                }
+            });
+
             // ---- チャット受信 ----
             onValue(ref(db, 'rooms/' + activeRoom + '/messages'), (snapshot) => {
                 const data = snapshot.val();
                 const box = document.getElementById('peerChatBox');
                 box.innerHTML = '';
                 if (data) {
-                    activeContainer.style.display = 'flex';
-                    peerChatOverlay.style.display = 'flex';
                     Object.values(data).forEach(msg => {
                         const div = document.createElement('div');
                         div.className = 'chat-msg ' + (msg.sender === 'host' ? 'host' : 'peer');
@@ -652,7 +678,6 @@
                 if (e.key === 'Enter') sendPeerChat();
             });
 
-            // ページ離脱時にクリーンアップ
             window.addEventListener('beforeunload', () => {
                 if (myScreenStream) myScreenStream.getTracks().forEach(t => t.stop());
                 if (myScreenPc) myScreenPc.close();
@@ -672,10 +697,9 @@
             let hostPeerCandUnsub = null;
             let peerOfferUnsub = null;
             let peerHostCandUnsub = null;
-
-            // 監視リスナー解除用
             let roomStatusUnsub = null;
             let chatUnsub = null;
+            let chatVisibleUnsub = null;
 
             const hostImageInput = document.getElementById('hostImageInput');
             const hostPickImgBtn = document.getElementById('hostPickImgBtn');
@@ -693,11 +717,11 @@
                 linkElem.textContent = link;
                 document.getElementById('resultZone').style.display = 'block';
 
-                // 既存のルームデータを完全にリセット
                 await remove(ref(db, 'rooms/' + rId));
                 await set(ref(db, 'rooms/' + rId), {
                     status: 'waiting',
-                    modeCommand: { action: 'lockAll', time: Date.now() }
+                    modeCommand: { action: 'lockAll', time: Date.now() },
+                    chatVisible: false
                 });
 
                 monitorRoom(rId);
@@ -727,6 +751,9 @@
                 const rId = document.getElementById('roomIdInput').value.trim();
                 if (!rId) return alert('ルームIDがありません');
 
+                // チャットを一旦非表示
+                await set(ref(db, 'rooms/' + rId + '/chatVisible'), false);
+
                 await remove(ref(db, 'rooms/' + rId + '/rtc'));
                 await set(ref(db, 'rooms/' + rId + '/modeCommand'), {
                     action: 'requestScreenShare',
@@ -745,7 +772,6 @@
                     time: Date.now()
                 });
 
-                // 受信側PCをクリーンアップ
                 if (peerOfferUnsub) { peerOfferUnsub(); peerOfferUnsub = null; }
                 if (peerHostCandUnsub) { peerHostCandUnsub(); peerHostCandUnsub = null; }
                 if (peerReceivePc) {
@@ -760,12 +786,11 @@
                 alert("相手の画面共有を停止しました。");
             });
 
-            // ---- 自分の画面を共有する ----
+            // ---- 自分の画面を共有する（相手の全画面に表示・チャット非表示） ----
             document.getElementById('hostShowMyScreenBtn').addEventListener('click', async () => {
                 const rId = document.getElementById('roomIdInput').value.trim();
                 if (!rId) return alert('ルームIDがありません');
 
-                // 既存の共有を完全停止
                 await stopHostScreenShareAction(rId, false);
 
                 try {
@@ -774,7 +799,6 @@
                         audio: true
                     });
 
-                    // Firebase上の古いシグナリングをクリア
                     await remove(ref(db, 'rooms/' + rId + '/rtcHostToPeer'));
 
                     hostScreenPc = new RTCPeerConnection(rtcConfig);
@@ -786,10 +810,6 @@
                         }
                     };
 
-                    hostScreenPc.onconnectionstatechange = () => {
-                        console.log('[Host→Guest] PC state:', hostScreenPc && hostScreenPc.connectionState);
-                    };
-
                     const offer = await hostScreenPc.createOffer();
                     await hostScreenPc.setLocalDescription(offer);
                     await set(ref(db, 'rooms/' + rId + '/rtcHostToPeer/offer'), {
@@ -798,7 +818,6 @@
                         time: Date.now()
                     });
 
-                    // answer 待ち
                     hostAnswerUnsub = onValue(ref(db, 'rooms/' + rId + '/rtcHostToPeer/answer'), async (snap) => {
                         const ans = snap.val();
                         if (ans && hostScreenPc && hostScreenPc.signalingState === 'have-local-offer') {
@@ -810,7 +829,6 @@
                         }
                     });
 
-                    // 相手の ICE 候補待ち
                     hostPeerCandUnsub = onValue(ref(db, 'rooms/' + rId + '/rtcHostToPeer/peerCandidates'), (snap) => {
                         const cands = snap.val();
                         if (cands && hostScreenPc) {
@@ -820,18 +838,18 @@
                         }
                     });
 
-                    // ブラウザの「共有停止」ボタン対応
                     hostScreenStream.getVideoTracks()[0].onended = () => {
                         stopHostScreenShareAction(rId, true);
                     };
 
-                    // 相手側にチャットオーバーレイを表示させる
+                    // ★ 相手側に「全画面表示のみ」を指示（チャットは出さない）
+                    await set(ref(db, 'rooms/' + rId + '/chatVisible'), false);
                     await set(ref(db, 'rooms/' + rId + '/modeCommand'), {
-                        action: 'showChat',
+                        action: 'shareFullscreen',
                         time: Date.now()
                     });
 
-                    alert("自分の画面共有を開始しました！");
+                    alert("自分の画面共有を開始しました！（相手の全画面に表示中）");
 
                 } catch (err) {
                     console.error('getDisplayMedia error:', err);
@@ -849,24 +867,22 @@
             });
 
             async function stopHostScreenShareAction(rId, notify) {
-                // リスナー解除
                 if (hostAnswerUnsub) { hostAnswerUnsub(); hostAnswerUnsub = null; }
                 if (hostPeerCandUnsub) { hostPeerCandUnsub(); hostPeerCandUnsub = null; }
 
-                // ストリーム停止
                 if (hostScreenStream) {
                     hostScreenStream.getTracks().forEach(t => t.stop());
                     hostScreenStream = null;
                 }
-
-                // PCクローズ
                 if (hostScreenPc) {
                     hostScreenPc.close();
                     hostScreenPc = null;
                 }
 
-                // Firebaseクリア
                 await remove(ref(db, 'rooms/' + rId + '/rtcHostToPeer'));
+
+                // チャット表示フラグもリセット（相手側でチャットを閉じる）
+                await set(ref(db, 'rooms/' + rId + '/chatVisible'), false);
 
                 if (notify) {
                     console.log('Host screen share stopped.');
@@ -881,7 +897,6 @@
                 peerOfferUnsub = onValue(ref(db, 'rooms/' + rId + '/rtc/offer'), async (snapshot) => {
                     const offer = snapshot.val();
 
-                    // 既存の受信PCを破棄
                     if (peerHostCandUnsub) { peerHostCandUnsub(); peerHostCandUnsub = null; }
                     if (peerReceivePc) {
                         peerReceivePc.close();
@@ -906,10 +921,6 @@
                         if (e.candidate) {
                             push(ref(db, 'rooms/' + rId + '/rtc/hostCandidates'), e.candidate.toJSON());
                         }
-                    };
-
-                    peerReceivePc.onconnectionstatechange = () => {
-                        console.log('[Guest→Host] PC state:', peerReceivePc && peerReceivePc.connectionState);
                     };
 
                     try {
@@ -949,7 +960,7 @@
                 alert("指定URLを相手の画面で開かせました！");
             });
 
-            // ---- ホスト側チャット送信 ----
+            // ---- ホスト側チャット送信（送信時に相手のチャット欄を出現させる） ----
             async function sendHostChat(imageObj = null) {
                 const rId = document.getElementById('roomIdInput').value.trim();
                 const input = document.getElementById('chatInput');
@@ -965,6 +976,9 @@
                         return;
                     }
                 }
+
+                // ★ チャット欄を相手側で表示させる
+                await set(ref(db, 'rooms/' + rId + '/chatVisible'), true);
 
                 push(ref(db, 'rooms/' + rId + '/messages'), {
                     sender: 'host',
@@ -1019,7 +1033,6 @@
                 const rId = document.getElementById('roomIdInput').value.trim();
                 if (!rId) return;
 
-                // すべてのリソースを停止
                 await stopHostScreenShareAction(rId, false);
 
                 if (peerOfferUnsub) { peerOfferUnsub(); peerOfferUnsub = null; }
@@ -1030,13 +1043,13 @@
                 }
                 if (roomStatusUnsub) { roomStatusUnsub(); roomStatusUnsub = null; }
                 if (chatUnsub) { chatUnsub(); chatUnsub = null; }
+                if (chatVisibleUnsub) { chatVisibleUnsub(); chatVisibleUnsub = null; }
 
                 await remove(ref(db, 'rooms/' + rId));
                 alert("システムをリセットしました。");
                 location.reload();
             });
 
-            // ページ離脱時にクリーンアップ
             window.addEventListener('beforeunload', () => {
                 if (hostScreenStream) hostScreenStream.getTracks().forEach(t => t.stop());
                 if (hostScreenPc) hostScreenPc.close();
