@@ -365,33 +365,23 @@
         // ============================================================
         const BASE_TITLE = 'Dg.t Docking';
         const UNREAD_PREFIX = '◉ ';
-
-        // 初期タイトルを必ず「Dg.t Docking」に統一
         document.title = BASE_TITLE;
 
         let hasUnread = false;
-
         function setUnreadTitle(unread) {
             hasUnread = unread;
             document.title = unread ? (UNREAD_PREFIX + BASE_TITLE) : BASE_TITLE;
         }
-
-        // タブがアクティブになったら未読解除
         function clearUnreadIfVisible() {
-            if (!document.hidden && hasUnread) {
-                setUnreadTitle(false);
-            }
+            if (!document.hidden && hasUnread) setUnreadTitle(false);
         }
-
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) {
-                clearUnreadIfVisible();
-            }
+            if (!document.hidden) clearUnreadIfVisible();
         });
         window.addEventListener('focus', clearUnreadIfVisible);
 
         // ============================================================
-        //  その他ユーティリティ
+        //  ユーティリティ
         // ============================================================
         const defaultRoomId = Math.floor(1000 + Math.random() * 9000).toString();
         const roomIdInput = document.getElementById('roomIdInput');
@@ -489,7 +479,6 @@
             let isScreenSharing = false;
 
             const knownMessageIds = new Set();
-            // 初回ロード時に既存メッセージを未読扱いしないためのフラグ
             let messageListenerInitialized = false;
 
             function stopMyScreenShareInternal() {
@@ -523,10 +512,18 @@
                 }
             }
 
-            function updateChatVisibility(hostSentMessage) {
-                if (hostSentMessage) {
+            // ==========================================================
+            // ★ チャット表示制御：メッセージが1件でもあれば必ず表示
+            // ==========================================================
+            let hasAnyMessages = false;
+
+            function updateChatVisibilityByMessages() {
+                if (hasAnyMessages) {
                     showChatOverlayWithPop();
-                } else if (!isScreenSharing) {
+                }
+                // メッセージが無い場合のみ、画面共有中でなければ閉じる
+                // （画面共有中でもメッセージがあれば上で表示済み）
+                if (!hasAnyMessages && !isScreenSharing) {
                     peerChatOverlay.style.display = 'none';
                 }
             }
@@ -537,7 +534,10 @@
 
                 if (cmd.action === 'lockAll') {
                     stopMyScreenShareInternal();
-                    peerChatOverlay.style.display = 'none';
+                    // メッセージが無ければチャット欄を閉じる
+                    if (!hasAnyMessages) {
+                        peerChatOverlay.style.display = 'none';
+                    }
                     activeContainer.style.display = 'none';
                     statusText.innerText = "接続完了：ホストからの指示を待っています...";
 
@@ -546,7 +546,10 @@
 
                     activeContainer.style.display = 'flex';
                     sharedVideoBox.style.display = 'block';
-                    peerChatOverlay.style.display = 'none';
+                    // メッセージがあればチャットは表示したまま、無ければ隠す
+                    if (!hasAnyMessages) {
+                        peerChatOverlay.style.display = 'none';
+                    }
                     statusText.innerText = "あなたの画面を全体共有中です";
 
                     try {
@@ -607,7 +610,10 @@
 
                 } else if (cmd.action === 'stopScreenShare') {
                     await stopMyScreenShare();
-                    peerChatOverlay.style.display = 'none';
+                    // メッセージが無ければチャットを閉じる
+                    if (!hasAnyMessages) {
+                        peerChatOverlay.style.display = 'none';
+                    }
 
                 } else if (cmd.action === 'openUrl') {
                     statusText.innerText = `指定サイトを開いています: ${cmd.url}`;
@@ -615,15 +621,29 @@
                 }
             });
 
+            // chatVisible は補助フラグとして扱う（メッセージ有無が最優先）
             onValue(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/chatVisible'), (snap) => {
-                updateChatVisibility(snap.val() === true);
+                if (snap.val() === true) {
+                    // フラグが立ったらチャット欄を表示（ただしメッセージが無くても）
+                    showChatOverlayWithPop();
+                } else {
+                    // フラグが下りても、メッセージがあれば表示継続
+                    if (!hasAnyMessages && !isScreenSharing) {
+                        peerChatOverlay.style.display = 'none';
+                    }
+                }
             });
 
-            // ---- メッセージ受信 ----
+            // ==========================================================
+            // ★ メッセージ受信：メッセージが1件でもあれば必ず表示
+            // ==========================================================
             onValue(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/messages'), (snapshot) => {
                 const data = snapshot.val();
                 const box = document.getElementById('peerChatBox');
                 box.innerHTML = '';
+
+                const msgCount = data ? Object.keys(data).length : 0;
+                hasAnyMessages = msgCount > 0;
 
                 if (data) {
                     let hasNewHostMessage = false;
@@ -638,17 +658,20 @@
 
                     box.scrollTop = box.scrollHeight;
 
-                    if (hasNewHostMessage) {
-                        showChatOverlayWithPop();
+                    // ★ メッセージが1件でもあれば必ずチャット欄を表示
+                    showChatOverlayWithPop();
 
-                        // ★ タブが非表示なら未読マークを付ける
-                        if (document.hidden) {
-                            setUnreadTitle(true);
-                        }
+                    // 未読タブマークは「新着」かつ「タブ非表示」のときだけ
+                    if (hasNewHostMessage && document.hidden) {
+                        setUnreadTitle(true);
+                    }
+                } else {
+                    // メッセージが0件になった場合（通常は起きない）
+                    if (!isScreenSharing) {
+                        peerChatOverlay.style.display = 'none';
                     }
                 }
 
-                // 初回ロード完了フラグを立てる
                 if (!messageListenerInitialized) {
                     messageListenerInitialized = true;
                 }
@@ -912,7 +935,6 @@
                         });
                         chatBox.scrollTop = chatBox.scrollHeight;
 
-                        // ホスト側でも未読タブマーク（タブ非表示時のみ）
                         if (hasNewPeerMessage && document.hidden) {
                             setUnreadTitle(true);
                         }
