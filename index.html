@@ -14,7 +14,7 @@
             min-height: 100vh;
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
             overflow-y: auto;
             position: relative;
             color: #1e293b;
@@ -36,10 +36,9 @@
             padding: 28px 30px;
             border-radius: 16px;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-            max-width: 720px; width: 100%;
-            margin: auto; position: relative; z-index: 10;
+            max-width: 900px; width: 100%;
+            margin: 20px auto; position: relative; z-index: 10;
             backdrop-filter: blur(5px);
-            max-height: 92vh; overflow-y: auto;
         }
         h2, h3 {
             margin-top: 0; color: #1e293b;
@@ -121,6 +120,40 @@
         }
         .status-waiting { background: #e2e8f0; color: #64748b; }
         .status-connected { background: #dcfce7; color: #15803d; }
+
+        /* ===== 相手ごとの操作パネル ===== */
+        .peer-panel {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 14px;
+        }
+        .peer-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .peer-panel-title {
+            font-weight: 700;
+            font-size: 1rem;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .peer-id-badge {
+            display: inline-block;
+            background: #2563eb;
+            color: white;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
         .screen-share-box {
             width: 100%; background: #000;
             border-radius: 12px; overflow: hidden;
@@ -128,7 +161,7 @@
             aspect-ratio: 16/9; display: flex;
             justify-content: center; align-items: center;
         }
-        #remoteVideo {
+        .remote-video {
             width: 100%; height: 100%;
             object-fit: contain;
         }
@@ -260,7 +293,6 @@
         <path d="M45,10 C42,15 35,12 30,18 C25,24 28,32 22,35 C15,38 10,32 5,42 C12,42 16,46 20,43 C24,40 25,35 30,36 C28,42 22,46 18,52 C24,52 30,48 34,44 C32,50 28,55 24,62 C32,58 38,52 42,46 C40,54 36,62 30,72 C40,66 48,58 52,48 C50,58 44,68 36,82 C48,74 58,64 62,50 C65,40 60,32 65,24 C70,16 80,20 85,12 C78,16 74,12 70,18 C66,24 68,32 62,35 C58,37 54,32 50,34 C54,28 56,22 54,16 C52,22 48,25 45,10 Z M65,48 C72,52 82,50 90,56 C82,56 76,58 72,62 C78,65 86,68 95,74 C84,72 76,70 70,66 C68,72 64,80 58,88 C62,80 64,74 65,66 C60,64 54,64 48,66 C54,62 60,60 65,48 Z" />
     </svg>
 
-    <!-- トースト通知のコンテナ -->
     <div id="toastContainer"></div>
 
     <!-- ホスト側コントロールパネル -->
@@ -284,33 +316,20 @@
 
         <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;">
 
-        <h3>🎛️ あなた（ホスト）からの主導コントロール</h3>
-        <p>相手の状態: <span id="peerStatusBadge" class="status-badge status-waiting">待機中...</span></p>
+        <h3>🎛️ 接続中の相手（<span id="peerCount">0</span>人）</h3>
+        <p style="color:#64748b; font-size:0.9rem; margin-top:-8px;">
+            リンクを開いた人の数だけパネルが追加されます。
+        </p>
 
-        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
-            <button id="hostTriggerShareBtn" class="btn-success">🖥️ 相手に画面共有を要求</button>
-            <button id="stopPeerShareBtn" class="btn-danger">⏹️ 相手の画面共有を停止</button>
-        </div>
-
-        <div class="form-group">
-            <label for="targetUrlInput">🎯 相手に開かせるURL</label>
-            <div style="display: flex; gap: 8px;">
-                <input type="url" id="targetUrlInput" value="https://www.google.com" placeholder="https://example.com">
-                <button id="sendUrlBtn" class="btn-primary" style="width: 140px;">URLを開かせる</button>
+        <div id="peerPanelsContainer">
+            <div id="noPeerMessage" style="text-align:center; padding:20px; color:#94a3b8;">
+                まだ誰も接続していません...
             </div>
         </div>
 
         <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;">
 
-        <h3>📺 受信している相手の画面</h3>
-        <div class="screen-share-box">
-            <div id="screenPlaceholder" class="screen-placeholder">相手の画面共有を待っています...</div>
-            <video id="remoteVideo" autoplay playsinline></video>
-        </div>
-
-        <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;">
-
-        <h3>💬 Jiffcy風 通話メッセージ・画像送信</h3>
+        <h3>💬 Jiffcy風 通話メッセージ・画像送信（全員共通）</h3>
         <div id="chatContainer" class="chat-box"></div>
         <div class="chat-input-row">
             <input type="file" id="hostImageInput" accept="image/*" style="display: none;">
@@ -379,7 +398,7 @@
         };
 
         // ============================================================
-        //  トースト通知（alert の代替）
+        //  ユーティリティ
         // ============================================================
         const toastContainer = document.getElementById('toastContainer');
         function showToast(message, type = 'info', duration = 3000) {
@@ -394,6 +413,10 @@
                     if (toast.parentNode) toast.parentNode.removeChild(toast);
                 }, 300);
             }, duration);
+        }
+
+        function generatePeerId() {
+            return 'peer_' + Math.random().toString(36).substring(2, 10);
         }
 
         function convertImageFileToBase64(file) {
@@ -431,15 +454,27 @@
             const peerImageInput = document.getElementById('peerImageInput');
             const peerPickImgBtn = document.getElementById('peerPickImgBtn');
 
-            set(ref(db, 'rooms/' + activeRoom + '/status'), 'connected');
+            // 自分専用の peerId を生成
+            const myPeerId = generatePeerId();
+
+            // Firebase に自分を登録
+            const myPeerRef = ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId);
+            set(myPeerRef, {
+                joinedAt: Date.now(),
+                online: true
+            });
+
+            // 離脱時に自分を削除
+            window.addEventListener('beforeunload', () => {
+                remove(myPeerRef);
+                if (myScreenStream) myScreenStream.getTracks().forEach(t => t.stop());
+                if (myScreenPc) myScreenPc.close();
+            });
 
             let myScreenStream = null;
             let myScreenPc = null;
-
             let myScreenAnswerUnsub = null;
             let myScreenHostCandUnsub = null;
-            let chatVisibilityUnsub = null;
-
             let isScreenSharing = false;
 
             function stopMyScreenShareInternal() {
@@ -461,7 +496,7 @@
             async function stopMyScreenShare() {
                 stopMyScreenShareInternal();
                 statusText.innerText = "画面共有が停止されました";
-                await remove(ref(db, 'rooms/' + activeRoom + '/rtc'));
+                await remove(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/rtc'));
             }
 
             function updateChatVisibility(hostSentMessage) {
@@ -476,7 +511,8 @@
                 }
             }
 
-            onValue(ref(db, 'rooms/' + activeRoom + '/modeCommand'), async (snapshot) => {
+            // ---- 自分のモードコマンド監視 ----
+            onValue(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/modeCommand'), async (snapshot) => {
                 const cmd = snapshot.val();
                 if (!cmd) return;
 
@@ -502,26 +538,26 @@
                         localSharedVideo.srcObject = myScreenStream;
                         isScreenSharing = true;
 
-                        await remove(ref(db, 'rooms/' + activeRoom + '/rtc'));
+                        await remove(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/rtc'));
 
                         myScreenPc = new RTCPeerConnection(rtcConfig);
                         myScreenStream.getTracks().forEach(track => myScreenPc.addTrack(track, myScreenStream));
 
                         myScreenPc.onicecandidate = e => {
                             if (e.candidate) {
-                                push(ref(db, 'rooms/' + activeRoom + '/rtc/peerCandidates'), e.candidate.toJSON());
+                                push(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/rtc/peerCandidates'), e.candidate.toJSON());
                             }
                         };
 
                         const offer = await myScreenPc.createOffer();
                         await myScreenPc.setLocalDescription(offer);
-                        await set(ref(db, 'rooms/' + activeRoom + '/rtc/offer'), {
+                        await set(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/rtc/offer'), {
                             type: offer.type,
                             sdp: offer.sdp,
                             time: Date.now()
                         });
 
-                        myScreenAnswerUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/rtc/answer'), async (snap) => {
+                        myScreenAnswerUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/rtc/answer'), async (snap) => {
                             const ans = snap.val();
                             if (ans && myScreenPc && myScreenPc.signalingState === 'have-local-offer') {
                                 try {
@@ -532,7 +568,7 @@
                             }
                         });
 
-                        myScreenHostCandUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/rtc/hostCandidates'), (snap) => {
+                        myScreenHostCandUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/rtc/hostCandidates'), (snap) => {
                             const cands = snap.val();
                             if (cands && myScreenPc) {
                                 Object.values(cands).forEach(async c => {
@@ -550,7 +586,7 @@
                         statusText.innerText = "画面共有がキャンセルまたは拒否されました";
                         sharedVideoBox.style.display = 'none';
                         isScreenSharing = false;
-                        await remove(ref(db, 'rooms/' + activeRoom + '/rtc'));
+                        await remove(ref(db, 'rooms/' + activeRoom + '/peers/' + myPeerId + '/rtc'));
                     }
 
                 } else if (cmd.action === 'stopScreenShare') {
@@ -563,11 +599,13 @@
                 }
             });
 
-            chatVisibilityUnsub = onValue(ref(db, 'rooms/' + activeRoom + '/chatVisible'), (snap) => {
+            // ---- チャット表示フラグ ----
+            onValue(ref(db, 'rooms/' + activeRoom + '/chatVisible'), (snap) => {
                 const visible = snap.val();
                 updateChatVisibility(visible === true);
             });
 
+            // ---- チャット受信 ----
             onValue(ref(db, 'rooms/' + activeRoom + '/messages'), (snapshot) => {
                 const data = snapshot.val();
                 const box = document.getElementById('peerChatBox');
@@ -606,6 +644,7 @@
 
                 push(ref(db, 'rooms/' + activeRoom + '/messages'), {
                     sender: 'peer',
+                    peerId: myPeerId,
                     text: text || '',
                     image: imgData,
                     time: Date.now()
@@ -626,25 +665,21 @@
                 if (e.key === 'Enter') sendPeerChat();
             });
 
-            window.addEventListener('beforeunload', () => {
-                if (myScreenStream) myScreenStream.getTracks().forEach(t => t.stop());
-                if (myScreenPc) myScreenPc.close();
-            });
-
         } else {
             // ============================================================
             //  ホスト側
             // ============================================================
-            let peerReceivePc = null;
-
-            let peerOfferUnsub = null;
-            let peerHostCandUnsub = null;
             let roomStatusUnsub = null;
+            let peersUnsub = null;
             let chatUnsub = null;
+
+            // peerId -> { pc, offerUnsub, hostCandUnsub, ... }
+            const peerStates = {};
 
             const hostImageInput = document.getElementById('hostImageInput');
             const hostPickImgBtn = document.getElementById('hostPickImgBtn');
 
+            // ---- セッションリンク発行 ----
             async function generateSessionLink() {
                 const rId = document.getElementById('roomIdInput').value.trim();
                 if (!rId) {
@@ -662,123 +697,212 @@
 
                 await remove(ref(db, 'rooms/' + rId));
                 await set(ref(db, 'rooms/' + rId), {
-                    status: 'waiting',
-                    modeCommand: { action: 'lockAll', time: Date.now() },
+                    createdAt: Date.now(),
                     chatVisible: false
                 });
 
-                monitorRoom(rId);
+                monitorPeers(rId);
                 monitorChat(rId);
-                setupWebRTCReceiver(rId);
 
                 showToast('接続リンクを発行しました', 'success');
             }
 
             document.getElementById('generateBtn').addEventListener('click', generateSessionLink);
 
-            function monitorRoom(rId) {
-                if (roomStatusUnsub) { roomStatusUnsub(); roomStatusUnsub = null; }
-                const badge = document.getElementById('peerStatusBadge');
-                roomStatusUnsub = onValue(ref(db, 'rooms/' + rId + '/status'), (snapshot) => {
-                    if (snapshot.val() === 'connected') {
-                        badge.innerText = "相手が接続しました！制御可能";
-                        badge.className = "status-badge status-connected";
+            // ---- peers 監視（人数分のパネルを生成） ----
+            function monitorPeers(rId) {
+                if (peersUnsub) { peersUnsub(); peersUnsub = null; }
+
+                peersUnsub = onValue(ref(db, 'rooms/' + rId + '/peers'), (snapshot) => {
+                    const peers = snapshot.val() || {};
+                    const container = document.getElementById('peerPanelsContainer');
+                    const peerCountEl = document.getElementById('peerCount');
+                    const noPeerMsg = document.getElementById('noPeerMessage');
+
+                    const currentPeerIds = Object.keys(peers);
+                    peerCountEl.textContent = currentPeerIds.length;
+
+                    if (currentPeerIds.length === 0) {
+                        if (noPeerMsg) noPeerMsg.style.display = 'block';
                     } else {
-                        badge.innerText = "待機中...";
-                        badge.className = "status-badge status-waiting";
+                        if (noPeerMsg) noPeerMsg.style.display = 'none';
                     }
+
+                    // 削除されたピアをクリーンアップ
+                    Object.keys(peerStates).forEach(pid => {
+                        if (!currentPeerIds.includes(pid)) {
+                            cleanupPeerState(pid);
+                        }
+                    });
+
+                    // 新規ピアのパネルを作成
+                    currentPeerIds.forEach((pid, idx) => {
+                        if (!peerStates[pid]) {
+                            createPeerPanel(rId, pid, idx);
+                        }
+                    });
                 });
             }
 
-            document.getElementById('hostTriggerShareBtn').addEventListener('click', async () => {
-                const rId = document.getElementById('roomIdInput').value.trim();
-                if (!rId) {
-                    showToast('ルームIDがありません', 'warn');
-                    return;
+            function cleanupPeerState(pid) {
+                const st = peerStates[pid];
+                if (!st) return;
+                if (st.offerUnsub) st.offerUnsub();
+                if (st.hostCandUnsub) st.hostCandUnsub();
+                if (st.pc) st.pc.close();
+                if (st.panelEl && st.panelEl.parentNode) {
+                    st.panelEl.parentNode.removeChild(st.panelEl);
                 }
+                delete peerStates[pid];
+            }
 
-                await set(ref(db, 'rooms/' + rId + '/chatVisible'), false);
-                await remove(ref(db, 'rooms/' + rId + '/rtc'));
-                await set(ref(db, 'rooms/' + rId + '/modeCommand'), {
-                    action: 'requestScreenShare',
-                    time: Date.now()
+            // ---- 相手ごとの操作パネルを生成 ----
+            function createPeerPanel(rId, pid, index) {
+                const container = document.getElementById('peerPanelsContainer');
+
+                const panel = document.createElement('div');
+                panel.className = 'peer-panel';
+                panel.dataset.peerId = pid;
+
+                panel.innerHTML = `
+                    <div class="peer-panel-header">
+                        <div class="peer-panel-title">
+                            👤 相手 #${index + 1}
+                            <span class="peer-id-badge">${pid}</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <button class="btn-success peer-trigger-share">🖥️ 画面共有を要求</button>
+                        <button class="btn-danger peer-stop-share" style="margin-top:0;">⏹️ 画面共有を停止</button>
+                    </div>
+                    <div class="form-group" style="margin-bottom:10px;">
+                        <label>🎯 この相手に開かせるURL</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="url" class="peer-url-input" value="https://www.google.com" placeholder="https://example.com">
+                            <button class="btn-primary peer-send-url" style="width: 140px;">URLを開かせる</button>
+                        </div>
+                    </div>
+                    <div class="screen-share-box">
+                        <div class="screen-placeholder">相手の画面共有を待っています...</div>
+                        <video class="remote-video" autoplay playsinline></video>
+                    </div>
+                `;
+
+                container.appendChild(panel);
+
+                const remoteVideo = panel.querySelector('.remote-video');
+                const placeholder = panel.querySelector('.screen-placeholder');
+                const triggerBtn = panel.querySelector('.peer-trigger-share');
+                const stopBtn = panel.querySelector('.peer-stop-share');
+                const urlInput = panel.querySelector('.peer-url-input');
+                const sendUrlBtn = panel.querySelector('.peer-send-url');
+
+                // ---- 状態オブジェクト ----
+                const st = {
+                    panelEl: panel,
+                    pc: null,
+                    offerUnsub: null,
+                    hostCandUnsub: null
+                };
+                peerStates[pid] = st;
+
+                // ---- 画面共有要求 ----
+                triggerBtn.addEventListener('click', async () => {
+                    await set(ref(db, 'rooms/' + rId + '/chatVisible'), false);
+                    await remove(ref(db, 'rooms/' + rId + '/peers/' + pid + '/rtc'));
+                    await set(ref(db, 'rooms/' + rId + '/peers/' + pid + '/modeCommand'), {
+                        action: 'requestScreenShare',
+                        time: Date.now()
+                    });
+                    showToast(`相手 #${index + 1} に画面共有を要求しました`, 'success');
                 });
-                showToast('相手に画面共有を要求しました', 'success');
-            });
 
-            document.getElementById('stopPeerShareBtn').addEventListener('click', async () => {
-                const rId = document.getElementById('roomIdInput').value.trim();
-                if (!rId) {
-                    showToast('ルームIDがありません', 'warn');
-                    return;
-                }
+                // ---- 画面共有停止 ----
+                stopBtn.addEventListener('click', async () => {
+                    await set(ref(db, 'rooms/' + rId + '/peers/' + pid + '/modeCommand'), {
+                        action: 'stopScreenShare',
+                        time: Date.now()
+                    });
 
-                await set(ref(db, 'rooms/' + rId + '/modeCommand'), {
-                    action: 'stopScreenShare',
-                    time: Date.now()
+                    if (st.offerUnsub) { st.offerUnsub(); st.offerUnsub = null; }
+                    if (st.hostCandUnsub) { st.hostCandUnsub(); st.hostCandUnsub = null; }
+                    if (st.pc) {
+                        st.pc.close();
+                        st.pc = null;
+                    }
+                    remoteVideo.srcObject = null;
+                    placeholder.style.display = 'flex';
+
+                    await remove(ref(db, 'rooms/' + rId + '/peers/' + pid + '/rtc'));
+                    showToast(`相手 #${index + 1} の画面共有を停止しました`, 'success');
                 });
 
-                if (peerOfferUnsub) { peerOfferUnsub(); peerOfferUnsub = null; }
-                if (peerHostCandUnsub) { peerHostCandUnsub(); peerHostCandUnsub = null; }
-                if (peerReceivePc) {
-                    peerReceivePc.close();
-                    peerReceivePc = null;
-                }
-                const remoteVideo = document.getElementById('remoteVideo');
-                remoteVideo.srcObject = null;
-                document.getElementById('screenPlaceholder').style.display = 'flex';
+                // ---- URLを開かせる ----
+                sendUrlBtn.addEventListener('click', async () => {
+                    const targetUrl = urlInput.value.trim();
+                    if (!targetUrl) {
+                        showToast('URLを入力してください', 'warn');
+                        return;
+                    }
+                    await set(ref(db, 'rooms/' + rId + '/peers/' + pid + '/modeCommand'), {
+                        action: 'openUrl',
+                        url: targetUrl,
+                        time: Date.now()
+                    });
+                    showToast(`相手 #${index + 1} の画面でURLを開かせました`, 'success');
+                });
 
-                await remove(ref(db, 'rooms/' + rId + '/rtc'));
-                showToast('相手の画面共有を停止しました', 'success');
-            });
+                // ---- このピアの WebRTC 受信セットアップ ----
+                setupPeerWebRTCReceiver(rId, pid, st, remoteVideo, placeholder);
+            }
 
-            function setupWebRTCReceiver(rId) {
-                if (peerOfferUnsub) { peerOfferUnsub(); peerOfferUnsub = null; }
-                if (peerHostCandUnsub) { peerHostCandUnsub(); peerHostCandUnsub = null; }
+            // ---- 各ピアの WebRTC 受信 ----
+            function setupPeerWebRTCReceiver(rId, pid, st, remoteVideo, placeholder) {
+                if (st.offerUnsub) { st.offerUnsub(); st.offerUnsub = null; }
+                if (st.hostCandUnsub) { st.hostCandUnsub(); st.hostCandUnsub = null; }
 
-                peerOfferUnsub = onValue(ref(db, 'rooms/' + rId + '/rtc/offer'), async (snapshot) => {
+                st.offerUnsub = onValue(ref(db, 'rooms/' + rId + '/peers/' + pid + '/rtc/offer'), async (snapshot) => {
                     const offer = snapshot.val();
 
-                    if (peerHostCandUnsub) { peerHostCandUnsub(); peerHostCandUnsub = null; }
-                    if (peerReceivePc) {
-                        peerReceivePc.close();
-                        peerReceivePc = null;
+                    if (st.hostCandUnsub) { st.hostCandUnsub(); st.hostCandUnsub = null; }
+                    if (st.pc) {
+                        st.pc.close();
+                        st.pc = null;
                     }
 
                     if (!offer) {
-                        document.getElementById('remoteVideo').srcObject = null;
-                        document.getElementById('screenPlaceholder').style.display = 'flex';
+                        remoteVideo.srcObject = null;
+                        placeholder.style.display = 'flex';
                         return;
                     }
 
-                    peerReceivePc = new RTCPeerConnection(rtcConfig);
+                    st.pc = new RTCPeerConnection(rtcConfig);
 
-                    peerReceivePc.ontrack = e => {
-                        const remoteVideo = document.getElementById('remoteVideo');
+                    st.pc.ontrack = e => {
                         remoteVideo.srcObject = e.streams[0];
-                        document.getElementById('screenPlaceholder').style.display = 'none';
+                        placeholder.style.display = 'none';
                     };
 
-                    peerReceivePc.onicecandidate = e => {
+                    st.pc.onicecandidate = e => {
                         if (e.candidate) {
-                            push(ref(db, 'rooms/' + rId + '/rtc/hostCandidates'), e.candidate.toJSON());
+                            push(ref(db, 'rooms/' + rId + '/peers/' + pid + '/rtc/hostCandidates'), e.candidate.toJSON());
                         }
                     };
 
                     try {
-                        await peerReceivePc.setRemoteDescription(new RTCSessionDescription(offer));
-                        const answer = await peerReceivePc.createAnswer();
-                        await peerReceivePc.setLocalDescription(answer);
-                        await set(ref(db, 'rooms/' + rId + '/rtc/answer'), {
+                        await st.pc.setRemoteDescription(new RTCSessionDescription(offer));
+                        const answer = await st.pc.createAnswer();
+                        await st.pc.setLocalDescription(answer);
+                        await set(ref(db, 'rooms/' + rId + '/peers/' + pid + '/rtc/answer'), {
                             type: answer.type,
                             sdp: answer.sdp
                         });
 
-                        peerHostCandUnsub = onValue(ref(db, 'rooms/' + rId + '/rtc/peerCandidates'), (snap) => {
+                        st.hostCandUnsub = onValue(ref(db, 'rooms/' + rId + '/peers/' + pid + '/rtc/peerCandidates'), (snap) => {
                             const cands = snap.val();
-                            if (cands && peerReceivePc) {
+                            if (cands && st.pc) {
                                 Object.values(cands).forEach(async c => {
-                                    try { await peerReceivePc.addIceCandidate(new RTCIceCandidate(c)); } catch (e) {}
+                                    try { await st.pc.addIceCandidate(new RTCIceCandidate(c)); } catch (e) {}
                                 });
                             }
                         });
@@ -788,22 +912,7 @@
                 });
             }
 
-            document.getElementById('sendUrlBtn').addEventListener('click', async () => {
-                const rId = document.getElementById('roomIdInput').value.trim();
-                const targetUrl = document.getElementById('targetUrlInput').value.trim();
-                if (!rId || !targetUrl) {
-                    showToast('IDまたはURLを入力してください', 'warn');
-                    return;
-                }
-
-                await set(ref(db, 'rooms/' + rId + '/modeCommand'), {
-                    action: 'openUrl',
-                    url: targetUrl,
-                    time: Date.now()
-                });
-                showToast('指定URLを相手の画面で開かせました', 'success');
-            });
-
+            // ---- ホスト側チャット送信（全員に届く） ----
             async function sendHostChat(imageObj = null) {
                 const rId = document.getElementById('roomIdInput').value.trim();
                 const input = document.getElementById('chatInput');
@@ -844,6 +953,7 @@
                 if (e.key === 'Enter') sendHostChat();
             });
 
+            // ---- チャット監視 ----
             function monitorChat(rId) {
                 if (chatUnsub) { chatUnsub(); chatUnsub = null; }
                 chatUnsub = onValue(ref(db, 'rooms/' + rId + '/messages'), (snapshot) => {
@@ -854,7 +964,11 @@
                         Object.values(data).forEach(msg => {
                             const div = document.createElement('div');
                             div.className = 'chat-msg ' + msg.sender;
-                            let contentHtml = (msg.sender === 'host' ? '自分' : '相手') + ': ';
+                            let label = msg.sender === 'host' ? '自分' : '相手';
+                            if (msg.sender === 'peer' && msg.peerId) {
+                                label = '相手(' + msg.peerId.substring(5, 9) + ')';
+                            }
+                            let contentHtml = label + ': ';
                             if (msg.text) {
                                 contentHtml += `<span>${escapeHtml(msg.text)}</span>`;
                             }
@@ -869,6 +983,7 @@
                 });
             }
 
+            // ---- リセット ----
             document.getElementById('resetBtn').addEventListener('click', async () => {
                 const rId = document.getElementById('roomIdInput').value.trim();
                 if (!rId) {
@@ -876,13 +991,9 @@
                     return;
                 }
 
-                if (peerOfferUnsub) { peerOfferUnsub(); peerOfferUnsub = null; }
-                if (peerHostCandUnsub) { peerHostCandUnsub(); peerHostCandUnsub = null; }
-                if (peerReceivePc) {
-                    peerReceivePc.close();
-                    peerReceivePc = null;
-                }
-                if (roomStatusUnsub) { roomStatusUnsub(); roomStatusUnsub = null; }
+                Object.keys(peerStates).forEach(pid => cleanupPeerState(pid));
+
+                if (peersUnsub) { peersUnsub(); peersUnsub = null; }
                 if (chatUnsub) { chatUnsub(); chatUnsub = null; }
 
                 await remove(ref(db, 'rooms/' + rId));
@@ -891,7 +1002,10 @@
             });
 
             window.addEventListener('beforeunload', () => {
-                if (peerReceivePc) peerReceivePc.close();
+                Object.keys(peerStates).forEach(pid => {
+                    const st = peerStates[pid];
+                    if (st.pc) st.pc.close();
+                });
             });
         }
 
